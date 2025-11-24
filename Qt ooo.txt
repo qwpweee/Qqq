@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Qt 移动端适配文档</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* 禁止 iOS 橡皮筋效果，像原生 App 一样 */
+        body { overscroll-behavior-y: none; }
+        
+        /* 树状图连接线 - 仅在桌面端或宽屏显示比较好，移动端为了点击区域大，可以简化 */
+        .tree-indent {
+            border-left: 1px solid #e5e7eb;
+            margin-left: 0.75rem; /* 12px */
+            padding-left: 0.75rem;
+        }
+
+        /* 选中态 */
+        .nav-item.active {
+            background-color: #eff6ff;
+            color: #1d4ed8;
+            border-right: 3px solid #2563eb;
+        }
+        .nav-item.active .icon-bg {
+            background-color: #bfdbfe;
+            color: #1d4ed8;
+        }
+
+        /* 箭头动画 */
+        .arrow-icon {
+            transition: transform 0.25s ease;
+        }
+        .arrow-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        /* 移动端详情页滑入动画 */
+        #mainContent {
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        /* 移动端：默认将详情页推到屏幕右侧外 */
+        @media (max-width: 768px) {
+            #mainContent {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                z-index: 50;
+                background: white;
+                transform: translateX(100%); /* 隐藏 */
+            }
+            #mainContent.slide-in {
+                transform: translateX(0); /* 显示 */
+            }
+        }
+
+        /* 代码块滚动优化 */
+        .code-scroll {
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        /* 语法高亮简易配色 */
+        .hl-k { color: #d55fde; font-weight: bold; } /* keyword */
+        .hl-t { color: #ef596f; } /* type */
+        .hl-s { color: #89ca78; } /* string */
+        .hl-c { color: #61afef; font-style: italic; } /* comment */
+        .hl-f { color: #e5c07b; } /* function */
+    </style>
+</head>
+<body class="h-screen flex flex-col bg-white overflow-hidden text-gray-800">
+
+    <!-- 顶部导航栏 (移动端详情页时不显示这个，详情页有自己的头) -->
+    <header class="h-14 bg-slate-900 text-white flex items-center px-4 shrink-0 justify-between z-40 relative shadow-md">
+        <div class="flex items-center gap-3">
+            <div class="bg-gradient-to-br from-green-400 to-blue-500 p-1.5 rounded-lg shadow-inner">
+                <i data-lucide="book" class="w-5 h-5 text-white"></i>
+            </div>
+            <h1 class="font-bold text-lg tracking-wide">Qt Docs</h1>
+        </div>
+        <!-- 搜索框 (桌面端显示完整，移动端简化) -->
+        <div class="relative w-full max-w-xs ml-4 hidden md:block">
+            <i data-lucide="search" class="absolute left-2.5 top-2 w-4 h-4 text-gray-400"></i>
+            <input type="text" id="desktopSearch" placeholder="搜索类名..." 
+                class="w-full pl-9 pr-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400 transition-all placeholder-gray-500">
+        </div>
+    </header>
+
+    <!-- 移动端搜索栏 (仅在列表页显示) -->
+    <div class="md:hidden p-3 bg-gray-50 border-b border-gray-200 shrink-0">
+        <div class="relative">
+            <i data-lucide="search" class="absolute left-3 top-2.5 w-4 h-4 text-gray-400"></i>
+            <input type="text" id="mobileSearch" placeholder="搜索组件 (如 Button)..." 
+                class="w-full pl-10 pr-3 py-2 bg-white border border-gray-300 rounded-lg text-sm shadow-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+        </div>
+    </div>
+
+    <!-- 主布局容器 -->
+    <div class="flex flex-1 overflow-hidden relative">
+        
+        <!-- 左侧：树状列表 -->
+        <aside class="w-full md:w-80 bg-white flex flex-col overflow-y-auto md:border-r border-gray-200" id="sidebar">
+            <div id="treeContainer" class="p-2 pb-20 md:pb-4">
+                <!-- 树内容由 JS 生成 -->
+            </div>
+        </aside>
+
+        <!-- 右侧：详情内容 (移动端是覆盖层) -->
+        <main id="mainContent" class="bg-gray-50 flex flex-col h-full md:flex-1 md:static md:transform-none">
+            
+            <!-- 移动端详情页顶部导航 (返回按钮) -->
+            <div class="md:hidden h-14 bg-white border-b border-gray-200 flex items-center px-4 shadow-sm shrink-0 sticky top-0 z-10">
+                <button onclick="closeDetail()" class="mr-4 p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-full active:bg-gray-200">
+                    <i data-lucide="arrow-left" class="w-6 h-6"></i>
+                </button>
+                <span class="font-bold text-lg truncate" id="mobileHeaderTitle">Details</span>
+            </div>
+
+            <!-- 真正的内容滚动区 -->
+            <div class="flex-1 overflow-y-auto p-4 md:p-10 scroll-smooth">
+                
+                <!-- 空状态 (仅桌面可见) -->
+                <div id="emptyState" class="hidden md:flex h-full flex-col items-center justify-center text-gray-400 select-none">
+                    <div class="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                        <i data-lucide="mouse-pointer-2" class="w-10 h-10 text-gray-300"></i>
+                    </div>
+                    <p>请在左侧选择一个类查看详情</p>
+                </div>
+
+                <!-- 详情卡片 -->
+                <div id="detailView" class="hidden md:block max-w-3xl mx-auto pb-10">
+                    <!-- 标题区 -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mb-6">
+                        <div class="flex items-center gap-3 mb-2">
+                            <span id="detailType" class="bg-blue-100 text-blue-700 text-[10px] uppercase font-bold px-2 py-0.5 rounded tracking-wider">CLASS</span>
+                            <span class="text-gray-400 text-xs font-mono" id="detailModule">Qt Widgets</span>
+                        </div>
+                        <h2 id="detailTitle" class="text-3xl font-bold text-slate-800 mb-4">ClassName</h2>
+                        <p id="detailDesc" class="text-gray-600 leading-relaxed text-sm md:text-base">
+                            Description goes here.
+                        </p>
+                    </div>
+
+                    <!-- 功能特性列表 -->
+                    <div class="mb-8">
+                        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 ml-1">常用功能</h3>
+                        <div id="detailFeatures" class="grid grid-cols-1 gap-3">
+                            <!-- JS 填充 -->
+                        </div>
+                    </div>
+
+                    <!-- 代码示例 -->
+                    <div>
+                        <div class="flex justify-between items-end mb-3 ml-1">
+                            <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">代码示例</h3>
+                            <span class="text-xs text-gray-400 font-mono">main.cpp</span>
+                        </div>
+                        <div class="bg-[#282c34] rounded-xl overflow-hidden shadow-lg border border-gray-700">
+                            <!-- 模拟 macOS 窗口头 -->
+                            <div class="h-6 bg-[#21252b] flex items-center px-3 gap-1.5 border-b border-gray-700/50">
+                                <div class="w-2.5 h-2.5 rounded-full bg-red-500/80"></div>
+                                <div class="w-2.5 h-2.5 rounded-full bg-yellow-500/80"></div>
+                                <div class="w-2.5 h-2.5 rounded-full bg-green-500/80"></div>
+                            </div>
+                            <!-- 代码内容 -->
+                            <pre class="p-4 text-sm text-gray-300 font-mono overflow-x-auto code-scroll leading-6" id="detailCode"></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- 1. Qt 数据源 ---
+        const qtData = [
+            {
+                id: "Core", label: "Core Modules", type: "module", expanded: true,
+                desc: "Qt 的基础模块，包含非 GUI 的核心功能。",
+                children: [
+                    {
+                        id: "QObject", label: "QObject", type: "class",
+                        desc: "所有 Qt 对象的基类。它是 Qt 对象模型的核心，提供了**信号与槽**机制、属性系统和事件处理能力。",
+                        features: ["Signals & Slots (通信)", "Event Filtering (事件过滤)", "deleteLater (安全删除)", "setObjectName (调试命名)"],
+                        code: `class MyObject : public QObject {
+    Q_OBJECT // 启用元对象系统
+public:
+    MyObject() {}
+signals:
+    void notice(const QString &msg);
+public slots:
+    void handle() {
+        emit notice("Done");
+    }
+};`
+                    },
+                    {
+                        id: "QTimer", label: "QTimer", type: "class",
+                        desc: "提供重复或单次触发的定时器。非常适合用于周期性更新 UI 或延迟执行任务。",
+                        features: ["start(msec)", "stop()", "timeout() 信号", "singleShot() (单次触发)"],
+                        code: `QTimer *timer = new QTimer(this);
+connect(timer, &QTimer::timeout, [](){
+    qDebug() << "Tick...";
+});
+timer->start(1000); // 每秒触发一次`
+                    }
+                ]
+            },
+            {
+                id: "Widgets", label: "UI Widgets", type: "module", expanded: true,
+                desc: "用户界面控件集合。",
+                children: [
+                    {
+                        id: "QWidget", label: "QWidget", type: "class",
+                        desc: "所有用户界面对象的基类。如果一个控件没有父级，它就是一个独立的窗口。",
+                        features: ["show() / hide()", "resize(w,h)", "setStyleSheet(css)", "close()"],
+                        code: `QWidget window;
+window.setWindowTitle("App");
+window.resize(300, 200);
+window.show();`
+                    },
+                    {
+                        id: "Buttons", label: "Buttons", type: "group",
+                        desc: "各种类型的按钮控件。",
+                        children: [
+                            {
+                                id: "QPushButton", label: "QPushButton", type: "class",
+                                desc: "标准的命令按钮。最常用的控件之一。",
+                                features: ["clicked() 信号", "setText()", "setIcon()", "setDisabled(bool)"],
+                                code: `QPushButton *btn = new QPushButton("Save", this);
+btn->setGeometry(10, 10, 100, 30);
+connect(btn, &QPushButton::clicked, this, &saveFile);`
+                            },
+                            {
+                                id: "QCheckBox", label: "QCheckBox", type: "class",
+                                desc: "复选框，提供开/关两种状态。",
+                                features: ["stateChanged(int)", "isChecked()", "setText()"],
+                                code: `QCheckBox *chk = new QCheckBox("Agree?", this);
+if (chk->isChecked()) {
+    proceed();
+}`
+                            }
+                        ]
+                    },
+                    {
+                        id: "Input", label: "Input Fields", type: "group",
+                        desc: "文本输入控件。",
+                        children: [
+                            {
+                                id: "QLineEdit", label: "QLineEdit", type: "class",
+                                desc: "单行文本输入框。常用于用户名、搜索框等。",
+                                features: ["text()", "setPlaceholderText()", "setEchoMode(Password)", "textChanged()"],
+                                code: `QLineEdit *edit = new QLineEdit(this);
+edit->setPlaceholderText("Enter password");
+edit->setEchoMode(QLineEdit::Password);`
+                            },
+                            {
+                                id: "QTextEdit", label: "QTextEdit", type: "class",
+                                desc: "多行富文本编辑器。支持 HTML 渲染。",
+                                features: ["toPlainText()", "setHtml()", "append()", "clear()"],
+                                code: `QTextEdit *txt = new QTextEdit(this);
+txt->setHtml("<b>Bold</b> text");`
+                            }
+                        ]
+                    },
+                    {
+                        id: "Layouts", label: "Layouts", type: "group",
+                        desc: "自动布局管理器。",
+                        children: [
+                            {
+                                id: "QVBoxLayout", label: "QVBoxLayout", type: "class",
+                                desc: "垂直布局。将子控件从上到下排列。",
+                                features: ["addWidget(widget)", "addStretch()", "setSpacing(int)"],
+                                code: `QVBoxLayout *layout = new QVBoxLayout;
+layout->addWidget(new QLabel("Top"));
+layout->addWidget(new QPushButton("Bottom"));
+widget->setLayout(layout);`
+                            },
+                            {
+                                id: "QGridLayout", label: "QGridLayout", type: "class",
+                                desc: "网格布局。按行和列对齐控件。",
+                                features: ["addWidget(w, row, col)", "setRowStretch()"],
+                                code: `QGridLayout *grid = new QGridLayout;
+grid->addWidget(new QLabel("Name:"), 0, 0);
+grid->addWidget(new QLineEdit(), 0, 1);`
+                            }
+                        ]
+                    }
+                ]
+            }
+        ];
+
+        // --- 2. 逻辑控制 ---
+
+        // 初始化
+        function init() {
+            lucide.createIcons();
+            renderTree(qtData, document.getElementById('treeContainer'));
+            
+            // 绑定搜索
+            ['desktopSearch', 'mobileSearch'].forEach(id => {
+                document.getElementById(id).addEventListener('input', handleSearch);
+            });
+        }
+
+        // 渲染树状图
+        function renderTree(nodes, container) {
+            const ul = document.createElement('ul');
+            // 根节点不需要左边距，子节点需要
+            const isRoot = container.id === 'treeContainer';
+            ul.className = isRoot ? "space-y-1" : "space-y-1 mt-1 tree-indent hidden"; // 默认折叠
+
+            nodes.forEach(node => {
+                const li = document.createElement('li');
+                
+                // --- 构建节点行 ---
+                const row = document.createElement('div');
+                row.className = "nav-item flex items-center p-2 rounded-lg cursor-pointer transition-colors active:scale-[0.98] select-none text-gray-700 hover:bg-gray-100";
+                row.dataset.id = node.id; // 用于搜索定位
+
+                // 1. 箭头 (如果有子节点)
+                const hasChildren = node.children && node.children.length > 0;
+                const arrow = document.createElement('i');
+                if (hasChildren) {
+                    arrow.setAttribute('data-lucide', 'chevron-down');
+                    arrow.className = `arrow-icon w-5 h-5 text-gray-400 mr-1 p-0.5 rounded-md hover:bg-gray-200 ${node.expanded ? '' : 'collapsed'}`;
+                    
+                    // 点击箭头：只折叠/展开，不进详情
+                    arrow.onclick = (e) => {
+                        e.stopPropagation();
+                        toggleNode(arrow, ulChild);
+                    };
+                } else {
+                    // 占位，保持对齐
+                    arrow.className = "w-5 h-5 mr-1"; 
+                }
+
+                // 2. 图标
+                const iconBg = document.createElement('div');
+                iconBg.className = "icon-bg w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center mr-3 text-gray-500 shrink-0 border border-gray-200";
+                iconBg.innerHTML = getIcon(node.type);
+
+                // 3. 文本容器
+                const textDiv = document.createElement('div');
+                textDiv.className = "flex-1 min-w-0";
+                textDiv.innerHTML = `<div class="font-semibold text-sm truncate">${node.label}</div>`;
+                if(node.type !== 'module') {
+                     textDiv.innerHTML += `<div class="text-[10px] text-gray-400 truncate">${node.desc.substring(0, 20)}...</div>`;
+                }
+
+                row.appendChild(arrow);
+                row.appendChild(iconBg);
+                row.appendChild(textDiv);
+
+                // --- 点击行逻辑 ---
+                row.onclick = () => {
+                    // A. UI 选中高亮
+                    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+                    row.classList.add('active');
+
+                    // B. 加载详情
+                    loadDetail(node);
+                    openDetailMobile();
+
+                    // C. 关键修复：如果点击的是父节点且当前折叠，自动展开
+                    if (hasChildren && ulChild.classList.contains('hidden')) {
+                         toggleNode(arrow, ulChild);
+                    }
+                };
+
+                li.appendChild(row);
+
+                // 递归渲染子节点
+                let ulChild = null;
+                if (hasChildren) {
+                    ulChild = renderTree(node.children, li);
+                    li.appendChild(ulChild);
+                    
+                    // 初始化展开状态
+                    if(node.expanded) {
+                        ulChild.classList.remove('hidden');
+                    }
+                }
+
+                ul.appendChild(li);
+            });
+
+            container.appendChild(ul);
+            // 渲染完后刷新图标
+            lucide.createIcons();
+            return ul;
+        }
+
+        // 辅助：获取图标
+        function getIcon(type) {
+            if(type === 'module') return '<i data-lucide="package" class="w-4 h-4"></i>';
+            if(type === 'group') return '<i data-lucide="folder" class="w-4 h-4"></i>';
+            if(type === 'class') return '<i data-lucide="code-2" class="w-4 h-4"></i>';
+            return '<i data-lucide="circle" class="w-4 h-4"></i>';
+        }
+
+        // 折叠/展开
+        function toggleNode(arrowEl, ulEl) {
+            if(!ulEl) return;
+            const isHidden = ulEl.classList.contains('hidden');
+            if (isHidden) {
+                ulEl.classList.remove('hidden');
+                arrowEl.classList.remove('collapsed');
+            } else {
+                ulEl.classList.add('hidden');
+                arrowEl.classList.add('collapsed');
+            }
+        }
+
+        // 加载详情内容
+        function loadDetail(node) {
+            document.getElementById('emptyState').classList.remove('md:flex');
+            document.getElementById('emptyState').classList.add('hidden');
+            document.getElementById('detailView').classList.remove('hidden');
+
+            // 文本填充
+            document.getElementById('detailTitle').textContent = node.label;
+            document.getElementById('mobileHeaderTitle').textContent = node.label;
+            document.getElementById('detailType').textContent = node.type.toUpperCase();
+            
+            // 描述 (简单处理 Markdown bold)
+            document.getElementById('detailDesc').innerHTML = node.desc.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+
+            // 特性列表
+            const featContainer = document.getElementById('detailFeatures');
+            featContainer.innerHTML = '';
+            if (node.features && node.features.length > 0) {
+                node.features.forEach(f => {
+                    const el = document.createElement('div');
+                    el.className = "flex items-start bg-white p-3 rounded-lg border border-gray-100 shadow-sm text-sm text-gray-700";
+                    el.innerHTML = `<i data-lucide="check-circle-2" class="w-4 h-4 text-green-500 mr-2 mt-0.5 shrink-0"></i>${f}`;
+                    featContainer.appendChild(el);
+                });
+            } else {
+                featContainer.innerHTML = '<div class="text-gray-400 text-sm italic pl-2">该节点为分类容器，请选择子项查看具体代码。</div>';
+            }
+
+            // 代码高亮
+            const codeEl = document.getElementById('detailCode');
+            if (node.code) {
+                codeEl.innerHTML = highlightCode(node.code);
+                codeEl.parentElement.classList.remove('hidden');
+            } else {
+                codeEl.parentElement.classList.add('hidden');
+            }
+            
+            lucide.createIcons();
+        }
+
+        // 简易高亮
+        function highlightCode(code) {
+            code = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            code = code.replace(/\b(class|public|private|protected|void|int|double|bool|const|new|return|if|else|this|signals|slots|emit|true|false)\b/g, '<span class="hl-k">$1</span>');
+            code = code.replace(/\b(Q[A-Za-z0-9]+)\b/g, '<span class="hl-t">$1</span>');
+            code = code.replace(/(".*?")/g, '<span class="hl-s">$1</span>');
+            code = code.replace(/(\/\/.*)/g, '<span class="hl-c">$1</span>');
+            code = code.replace(/\b([a-z][a-zA-Z0-9_]*)(?=\()/g, '<span class="hl-f">$1</span>'); // 函数名尝试
+            return code;
+        }
+
+        // --- 移动端视图控制 ---
+        const mainContent = document.getElementById('mainContent');
+
+        function openDetailMobile() {
+            // 仅在小屏幕生效
+            if (window.innerWidth < 768) {
+                mainContent.classList.add('slide-in');
+            }
+        }
+
+        function closeDetail() {
+            mainContent.classList.remove('slide-in');
+        }
+
+        // --- 搜索功能 ---
+        function handleSearch(e) {
+            const val = e.target.value.toLowerCase();
+            const items = document.querySelectorAll('.nav-item');
+            
+            items.forEach(item => {
+                const text = item.textContent.toLowerCase();
+                const li = item.parentElement;
+                
+                if(val === "") {
+                    item.style.display = "flex";
+                } else {
+                    if(text.includes(val)) {
+                        item.style.display = "flex";
+                        // 展开所有父级
+                        let parent = li.parentElement; // ul
+                        while(parent && parent.id !== 'treeContainer') {
+                            parent.classList.remove('hidden');
+                            // 箭头修正
+                            const parentLi = parent.parentElement;
+                            const arrow = parentLi.querySelector('.arrow-icon');
+                            if(arrow) arrow.classList.remove('collapsed');
+                            
+                            parent = parentLi.parentElement;
+                        }
+                    } else {
+                        item.style.display = "none";
+                    }
+                }
+            });
+        }
+
+        // 启动
+        init();
+
+    </script>
+</body>
+</html>
+
